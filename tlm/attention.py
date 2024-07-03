@@ -26,16 +26,15 @@ class AttentionLayer(linen.Module):
         self._k_layer = linen.Dense(self.num_heads * self.inner_features)
         self._q_layer = linen.Dense(self.num_heads * self.inner_features)
         self._v_layer = linen.Dense(self.num_heads * self.out_features)
+        self._mix_heads_layer = linen.Dense(self.out_features)
 
     @linen.compact
-    def __call__(
-        self, inputs: Batched[Vector], sequence_mask: Boolean[Vector] | None = None
-    ) -> Batched[Vector]:
+    def __call__(self, inputs: Batched[Vector], masked: bool) -> Batched[Vector]:
         """Compute the attention layer forward pass.
 
         Args:
             inputs (Batched[Vector]): Array containing the input vectors to process.
-            sequence_mask (Boolean[Vector]): Array containing the positions to mask.
+            masked (bool): Flag denoting whether the attention should be masked or not.
 
         Returns:
             Batched[Vector]: Result of the attention layer for each input.
@@ -45,17 +44,21 @@ class AttentionLayer(linen.Module):
         k_array = self._k_layer(inputs).reshape(-1, self.num_heads, self.inner_features)
         v_array = self._v_layer(inputs).reshape(-1, self.num_heads, self.out_features)
 
+        # Generate the optional mask to use in the attention
+        mask = masked or create_attention_mask(inputs.shape[0])
+
         # Compute the attention applying the mask and concatenate the attention heads
-        attention = _multi_head_attention(q_array, k_array, v_array, sequence_mask)
+        attention = _multi_head_attention(q_array, k_array, v_array, mask)
         attention = attention.transpose(1, 0, 2)
-        return attention.reshape(-1, self.num_heads * self.out_features)
+        attention = attention.reshape(-1, self.num_heads * self.out_features)
+        return self._mix_heads_layer(attention)
 
 
 def compute_attention(
     queries: Batched[Vector],
     keys: Batched[Vector],
     values: Batched[Vector],
-    sequence_mask: Boolean[Vector] | None = None,
+    mask: Boolean[Matrix] | None,
 ) -> Batched[Vector]:
     r"""Compute the attention between queries, keys and values of a single attention head.
 
@@ -67,15 +70,15 @@ def compute_attention(
         queries (Batched[Vector]): Array containing a batch of query vectors.
         keys (Batched[Vector]): Array containing a batch of key vectors.
         values (Batched[Vector]): Array containing a batch of value vectors.
-        sequence_mask (Boolean[Vector]): Array containing the positions to mask.
+        mask (Boolean[Matrix] | None): Optional array containing the mask to use in attention.
 
     Returns:
         Batched[Vector]: Array containing the result of the attention.
     """
     raw_scores = queries @ jnp.matrix_transpose(keys)
     raw_scores = raw_scores / jnp.sqrt(keys.shape[1])
-    if sequence_mask is not None:
-        raw_scores = raw_scores * create_attention_mask(sequence_mask)
+    if mask is not None:
+        raw_scores = raw_scores * mask
     return jax.nn.softmax(raw_scores, axis=-1) @ values
 
 
@@ -83,23 +86,19 @@ def compute_attention(
 _multi_head_attention = jax.vmap(compute_attention, in_axes=(1, 1, 1, None))
 
 
-def create_attention_mask(sequence_mask: Boolean[Vector]) -> Matrix:
-    """Create an attention mask from a sequence mask.
+def create_attention_mask(sequence_length: int) -> Matrix:
+    """Create an attention mask for a given sequence length.
 
     Note:
-        The attention mask contains ``0.0`` for unmasked values and ``ENSURE_MASKED_IS_ZERO`` for
+        The attention mask contains ``1.0`` for unmasked values and ``ENSURE_MASKED_IS_ZERO`` for
         masked values. ``ENSURE_MASKED_IS_ZERO == -1e9`` ensures that the probability of that value
         in a softmax calculation is effectively zero: ``exp(ENSURE_MASKED_IS_ZERO) -> 0.0``.
 
     Args:
-        sequence_mask (Boolean[Vector]): Array containing the sequence mask.
+        sequence_length (int): Length of the sequence.
 
     Returns:
         Matrix: Mask to use in the attention mechanism.
     """
-    return (
-        jnp.multiply(
-            jnp.expand_dims(sequence_mask, axis=-1), jnp.expand_dims(sequence_mask, axis=-2)
-        )
-        * ENSURE_MASKED_IS_ZERO
-    )
+    mask = jnp.ones((sequence_length, sequence_length))
+    return mask + jnp.triu(mask) * ENSURE_MASKED_IS_ZERO
