@@ -2,6 +2,7 @@
 
 import jax.numpy as jnp
 
+
 from .types import Batched, Vector
 
 __all__ = ["encode_sequence", "one_hot_encode", "pad_vectors"]
@@ -32,7 +33,7 @@ def pad_vectors(vectors: Batched[Vector], batch_size: int) -> Batched[Vector]:
     num_entries: int = vectors.shape[0]
     if num_entries > batch_size:
         raise ValueError(f"Input array is larger than provided {batch_size=}")
-    return jnp.pad(vectors, (0, max(0, batch_size - num_entries)))
+    return jnp.pad(vectors, ((0, max(0, batch_size - num_entries)), (0, 0)))
 
 
 def encode_sequence(sequence: str) -> Batched[Vector]:
