@@ -5,10 +5,10 @@ from functools import reduce
 from flax import linen
 
 from .attention import AttentionLayer
-from .encode import VOCABULARY_SIZE
+from .data import VOCABULARY_SIZE
 from .types import Batched, Vector
 
-__all__ = ["FeedForward"]
+__all__ = ["TinyGPT"]
 
 
 class TinyGPT(linen.Module):
@@ -24,7 +24,19 @@ class TinyGPT(linen.Module):
         ] + [linen.Dense(features=VOCABULARY_SIZE)]
 
     def __call__(self, inputs: Batched[Vector]) -> Batched[Vector]:
-        """Return the forward pass of the ``TinyGPT`` model on some input data."""
+        """Return the forward pass of the ``TinyGPT`` model on some input data.
+
+        Warning:
+            This function returns the ``logits`` of the probability distribution. Make sure to
+            compute ``softmax`` on the results to generate the probability distribution over tokens
+            in the alphabet.
+
+        Args:
+            inputs (Batched[Vector]): Array of input vectors.
+
+        Returns:
+            Batched[Vector]: Logits of the probability distribution.
+        """
         embeddings = self._token_embedding(inputs)
         return reduce(lambda activations, layer: layer(activations), self._blocks, embeddings)
 
@@ -48,28 +60,3 @@ class DecoderBlock(linen.Module):
         activations_3 = self._feedforward(activations_2)
         activations_4 = linen.LayerNorm()(activations_3 + activations_2)
         return activations_4
-
-
-class FeedForward(linen.Module):
-    """Class containing the implementation of the standard residual feed forward."""
-
-    out_features: int
-    num_layers: int
-
-    def setup(self) -> None:
-        """Setup the ``FeedForward`` object."""
-        self._perceptrons = [linen.Dense(self.out_features) for _ in range(self.num_layers)]
-
-    @linen.compact
-    def __call__(self, inputs: Batched[Vector]) -> Batched[Vector]:
-        """Return the result of the forward pass of the ``FeedForward`` module."""
-        activations = inputs
-        residuals: Batched[Vector] | None = None
-        for _ in range(self.num_layers):
-            activations = linen.Dense(self.out_features)(activations)
-            if residuals is not None:
-                activations = activations + residuals
-            activations = linen.LayerNorm()(activations)
-            activations = linen.relu(activations)
-            residuals = activations
-        return activations
