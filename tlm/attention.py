@@ -8,7 +8,12 @@ from flax import linen
 
 from .types import Batched, Boolean, Matrix, Vector
 
-__all__ = ["create_attention_mask", "compute_attention", "AttentionLayer"]
+__all__ = [
+    "create_causal_attention_mask",
+    "create_padding_attention_mask",
+    "compute_attention",
+    "AttentionLayer",
+]
 
 # Constant to ensure the mask is correctly applied by ground masked values towards 0.0 probability
 ENSURE_MASKED_IS_ZERO: float = -1e9
@@ -29,12 +34,15 @@ class AttentionLayer(linen.Module):
         self._mix_heads_layer = linen.Dense(self.out_features)
 
     @linen.compact
-    def __call__(self, inputs: Batched[Vector], masked: bool) -> Batched[Vector]:
+    def __call__(self, inputs: Batched[Vector], padding_mask: Boolean[Vector]) -> Batched[Vector]:
         """Compute the attention layer forward pass.
+
+        Note:
+            This function will apply a causal mask to its inputs automatically.
 
         Args:
             inputs (Batched[Vector]): Array containing the input vectors to process.
-            masked (bool): Flag denoting whether the attention should be masked or not.
+            padding_mask (Boolean[Vector]): Padding mask to apply in the attention.
 
         Returns:
             Batched[Vector]: Result of the attention layer for each input.
@@ -45,10 +53,11 @@ class AttentionLayer(linen.Module):
         v_array = self._v_layer(inputs).reshape(-1, self.num_heads, self.out_features)
 
         # Generate the optional mask to use in the attention
-        mask = masked or create_attention_mask(inputs.shape[0])
+        causal_mask = create_causal_attention_mask(inputs.shape[0])
+        padding_mask = create_padding_attention_mask(padding_mask)
 
         # Compute the attention applying the mask and concatenate the attention heads
-        attention = _multi_head_attention(q_array, k_array, v_array, mask)
+        attention = _multi_head_attention(q_array, k_array, v_array, causal_mask * padding_mask)
         attention = attention.transpose(1, 0, 2)
         attention = attention.reshape(-1, self.num_heads * self.out_features)
         return self._mix_heads_layer(attention)
@@ -86,7 +95,7 @@ def compute_attention(
 _multi_head_attention = jax.vmap(compute_attention, in_axes=(1, 1, 1, None))
 
 
-def create_attention_mask(sequence_length: int) -> Matrix:
+def create_causal_attention_mask(sequence_length: int) -> Matrix:
     """Create an attention mask for a given sequence length.
 
     Note:
@@ -100,5 +109,27 @@ def create_attention_mask(sequence_length: int) -> Matrix:
     Returns:
         Matrix: Mask to use in the attention mechanism.
     """
-    mask = jnp.ones((sequence_length, sequence_length))
-    return mask + jnp.triu(mask) * ENSURE_MASKED_IS_ZERO
+    lower_diagonal_idx = (jnp.arange(1, sequence_length), jnp.arange(0, sequence_length - 1))
+
+    mask = jnp.full((sequence_length, sequence_length), ENSURE_MASKED_IS_ZERO)
+    mask = mask.at[jnp.diag_indices(sequence_length)].set(1.0)
+    mask = mask.at[lower_diagonal_idx].set(1.0)
+    return mask
+
+
+def create_padding_attention_mask(padding_mask: Boolean[Vector]) -> Matrix:
+    """Create the padding attention mask for a given padding mask.
+
+    Note:
+        The attention mask contains ``1.0`` for unmasked values and ``ENSURE_MASKED_IS_ZERO`` for
+        masked values. ``ENSURE_MASKED_IS_ZERO == -1e9`` ensures that the probability of that value
+        in a softmax calculation is effectively zero: ``exp(ENSURE_MASKED_IS_ZERO) -> 0.0``.
+
+    Args:
+        padding_mask (Boolean[Vector]): Vector containing the boolean padding mask.
+
+    Returns:
+        Matrix: Mask to use in the attention mechanism.
+    """
+    padding_mask = jnp.invert(padding_mask)[None]
+    return (padding_mask * padding_mask.T) * ENSURE_MASKED_IS_ZERO + 1.0
