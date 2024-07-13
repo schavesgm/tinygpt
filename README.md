@@ -1,5 +1,5 @@
 <h1 align="center">
-    `TinyGPT`
+    TinyGPT
 </h1>
 
 This repository contains a simple and easy-to-understand implementation of a GPT model using `jax`
