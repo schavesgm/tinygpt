@@ -5,8 +5,7 @@ from functools import reduce
 from flax import linen
 
 from .attention import AttentionLayer
-from .data import VOCABULARY_SIZE
-from .types import Batched, Vector
+from .types import Batched, Boolean, Vector
 
 __all__ = ["TinyGPT"]
 
@@ -15,15 +14,17 @@ class TinyGPT(linen.Module):
     """Module containing a simple and tiny GPT model."""
 
     num_blocks: int
+    vocabulary_size: int
 
     def setup(self) -> None:
         """Setup the ``TinyGPT`` object."""
         self._token_embedding = linen.Dense(features=256)
         self._blocks: list[DecoderBlock] = [
             DecoderBlock(out_features=256) for _ in range(self.num_blocks)
-        ] + [linen.Dense(features=VOCABULARY_SIZE)]
+        ]
+        self._output_layer = linen.Dense(features=self.vocabulary_size)
 
-    def __call__(self, inputs: Batched[Vector]) -> Batched[Vector]:
+    def __call__(self, inputs: Batched[Vector], padding_mask: Boolean[Vector]) -> Batched[Vector]:
         """Return the forward pass of the ``TinyGPT`` model on some input data.
 
         Warning:
@@ -33,12 +34,16 @@ class TinyGPT(linen.Module):
 
         Args:
             inputs (Batched[Vector]): Array of input vectors.
+            padding_mask (Boolean[Vector]): Array containing the padding vector mask.
 
         Returns:
             Batched[Vector]: Logits of the probability distribution.
         """
         embeddings = self._token_embedding(inputs)
-        return reduce(lambda activations, layer: layer(activations), self._blocks, embeddings)
+        activations = reduce(
+            lambda activations, layer: layer(activations, padding_mask), self._blocks, embeddings
+        )
+        return self._output_layer(activations)
 
 
 class DecoderBlock(linen.Module):
@@ -53,9 +58,9 @@ class DecoderBlock(linen.Module):
         self._feedforward = linen.Dense(self.out_features)
 
     @linen.compact
-    def __call__(self, inputs: Batched[Vector]) -> Batched[Vector]:
+    def __call__(self, inputs: Batched[Vector], padding_mask: Boolean[Vector]) -> Batched[Vector]:
         """Compute the forward pass of the ``DecoderBlock`` on some input data."""
-        activations_1 = self._attention(inputs, masked=True)
+        activations_1 = self._attention(inputs, padding_mask)
         activations_2 = linen.LayerNorm()(activations_1 + inputs)
         activations_3 = self._feedforward(activations_2)
         activations_4 = linen.LayerNorm()(activations_3 + activations_2)
