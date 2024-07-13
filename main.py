@@ -113,7 +113,7 @@ def create_generate_function(
 
 def main() -> None:
     """Entry point of the script."""
-    num_epochs: int = 10
+    num_epochs: int = 100
     batch_size: int = 6
     num_blocks: int = 4
 
