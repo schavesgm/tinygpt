@@ -64,11 +64,19 @@ def update_function(
 
     def _forward_pass(parameters: Parameters) -> tuple[Scalar, Batched[Vector]]:
         """Compute the complete forward pass to produce the logits and the losses."""
+        # Compute the predicted logits for the input sequence for each position. This is equivalent
+        # to computing `p(x_i | x_j; 0 <= j < i)` as the model has access to the context information
+        # given the attention mechanism. Note that `logits` do not represent probabilities, to
+        # transform them into probabilities, we should pass the values to a `softmax` function.
         logits = state.apply_fn(
             {"params": parameters}, positionally_encode(one_hot_encodings), padding_mask
         )
-        loss = optax.losses.softmax_cross_entropy(logits, one_hot_encodings).mean()
-        return loss, logits
+
+        # Compute the loss function between the predicted logits and the expected next token
+        # probability distribution. Note that we need to compare `logit[i]` with
+        # `one_hot_encodings[i + 1]` as the task of the model is to learn to produce the next token.
+        loss = optax.losses.softmax_cross_entropy(logits[:-1], one_hot_encodings[1:, :]).mean()
+        return loss, logits[:-1]
 
     compute_value_and_grads = jax.value_and_grad(_forward_pass, has_aux=True)
     (loss, logits), gradients = compute_value_and_grads(state.params)
@@ -150,10 +158,10 @@ def main() -> None:
             train_state, loss, logits = update_function(
                 train_state, one_hot_encodings, padding_mask
             )
-            predicted = decode(jnp.argmax(jax.nn.softmax(logits, axis=1), axis=1))
+            predicted = sequence[0] + decode(jnp.argmax(jax.nn.softmax(logits, axis=1), axis=1))
 
             if batch % 20 == 0:
-                sequence_identity = get_sequence_identity(sequence, predicted)
+                sequence_identity = get_sequence_identity(sequence[1:], predicted[1:])
                 LOGGER.info(
                     "%d.%d - loss=%.4f - (reference, prediction)=(%s, %s) - identity=%.2f ",
                     epoch,
