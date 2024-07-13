@@ -16,6 +16,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 version = "0.0.1"
 
+[project.optional-dependencies]
+cpu = ["jax >= 0.4.2"]
+gpu = ["jax[cuda12] >= 0.4.2"]
+
 [tool.ruff]
 ignore-init-module-imports = true
 line-length = 100
