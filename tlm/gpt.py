@@ -37,7 +37,7 @@ class TinyGPT(linen.Module):
             padding_mask (Boolean[Vector]): Array containing the padding vector mask.
 
         Returns:
-            Batched[Vector]: Logits of the probability distribution.
+            Batched[Vector]: Logits of the probability distribution over vocabulary tokens.
         """
         embeddings = self._token_embedding(inputs)
         activations = reduce(
@@ -47,7 +47,12 @@ class TinyGPT(linen.Module):
 
 
 class DecoderBlock(linen.Module):
-    """Module containing the implementation of the decoder block in the GPT architecture."""
+    """Module containing the implementation of the decoder block in the GPT architecture.
+
+    Note:
+        A ``DecoderBlock`` contains a self-attention layer, followed by a feedforward layer.
+        Residual connections are applied after each transformation and before the layer norms.
+    """
 
     out_features: int
     num_heads: int = 4
@@ -55,13 +60,47 @@ class DecoderBlock(linen.Module):
     def setup(self) -> None:
         """Setup a ``DecoderBlock`` object."""
         self._attention = AttentionLayer(num_heads=self.num_heads, out_features=self.out_features)
+        self._attention_norm = linen.LayerNorm()
         self._feedforward = linen.Dense(self.out_features)
+        self._feedforward_norm = linen.LayerNorm()
 
     @linen.compact
     def __call__(self, inputs: Batched[Vector], padding_mask: Boolean[Vector]) -> Batched[Vector]:
-        """Compute the forward pass of the ``DecoderBlock`` on some input data."""
-        activations_1 = self._attention(inputs, padding_mask)
-        activations_2 = linen.LayerNorm()(activations_1 + inputs)
-        activations_3 = self._feedforward(activations_2)
-        activations_4 = linen.LayerNorm()(activations_3 + activations_2)
-        return activations_4
+        """Compute the forward pass of the ``DecoderBlock`` on some input data.
+
+        Args:
+            inputs (Batched[Vector]): Array of input vectors to process. Must have
+                ``self.out_features`` features.
+            padding_mask (Boolean[Vector]): Vector defining the mask eliminating masking on padded
+                tokens.
+
+        Returns:
+            Batched[Vector]: Output of the ``DecoderBlock`` layer.
+        """
+        attention_acts = self._attention(inputs, padding_mask)
+        attention_acts = _residual_connection(attention_acts, inputs)
+        attention_acts = self._attention_norm(attention_acts)
+
+        feedforward_acts = self._feedforward(attention_acts)
+        feedforward_acts = _residual_connection(feedforward_acts, attention_acts)
+        feedforward_acts = self._feedforward_norm(feedforward_acts)
+        return feedforward_acts
+
+
+def _residual_connection(
+    activations: Batched[Vector], residuals: Batched[Vector]
+) -> Batched[Vector]:
+    """Return a new batch of vectors by applying some residuals to the activations.
+
+    Note:
+        ``activations`` and ``residuals`` must have the same dimensions.
+
+    Args:
+        activations (Batched[Vector]): Collection of activations.
+        residuals (Batched[Vector]): Collection of residuals to apply in the connection.
+
+    Returns:
+        Batched[Vector]: Result of applying the residual connection between ``activations`` and
+        ``residuals``.
+    """
+    return activations + residuals

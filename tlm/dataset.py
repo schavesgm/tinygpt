@@ -1,4 +1,4 @@
-"""Module containing functionality to encode sequences."""
+"""Module containing functionality to create and manipulate sequence datasets."""
 
 import random
 from collections.abc import Generator

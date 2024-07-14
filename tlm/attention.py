@@ -47,13 +47,15 @@ class AttentionLayer(linen.Module):
         Returns:
             Batched[Vector]: Result of the attention layer for each input.
         """
+        batch_size: int = inputs.shape[0]
+
         # Create the query, key and value vectors
         q_array = self._q_layer(inputs).reshape(-1, self.num_heads, self.inner_features)
         k_array = self._k_layer(inputs).reshape(-1, self.num_heads, self.inner_features)
         v_array = self._v_layer(inputs).reshape(-1, self.num_heads, self.out_features)
 
         # Generate the optional mask to use in the attention
-        causal_mask = create_causal_attention_mask(inputs.shape[0])
+        causal_mask = create_causal_attention_mask(batch_size)
         padding_mask = create_padding_attention_mask(padding_mask)
 
         # Compute the attention applying the mask and concatenate the attention heads
