@@ -16,7 +16,10 @@ __all__ = [
 ]
 
 # Constant to ensure the mask is correctly applied by ground masked values towards 0.0 probability
-ENSURE_MASKED_IS_ZERO: float = -1e9
+MASKED_ATTENTION_INDEX: float = -1e9
+
+# Constant to ensure that the mask is not applied at a given index
+UNMASKED_ATTENTION_INDEX: float = 1.0
 
 
 class AttentionLayer(linen.Module):
@@ -111,11 +114,8 @@ def create_causal_attention_mask(sequence_length: int) -> Matrix:
     Returns:
         Matrix: Mask to use in the attention mechanism.
     """
-    lower_diagonal_idx = (jnp.arange(1, sequence_length), jnp.arange(0, sequence_length - 1))
-
-    mask = jnp.full((sequence_length, sequence_length), ENSURE_MASKED_IS_ZERO)
-    mask = mask.at[jnp.diag_indices(sequence_length)].set(1.0)
-    mask = mask.at[lower_diagonal_idx].set(1.0)
+    mask = jnp.full((sequence_length, sequence_length), MASKED_ATTENTION_INDEX)
+    mask = mask.at[jnp.tril_indices(sequence_length)].set(UNMASKED_ATTENTION_INDEX)
     return mask
 
 
@@ -133,5 +133,6 @@ def create_padding_attention_mask(padding_mask: Boolean[Vector]) -> Matrix:
     Returns:
         Matrix: Mask to use in the attention mechanism.
     """
-    padding_mask = jnp.invert(padding_mask)[None]
-    return (padding_mask * padding_mask.T) * ENSURE_MASKED_IS_ZERO + 1.0
+    padding_mask = jnp.invert(padding_mask[None])
+    mask = jnp.invert(padding_mask * padding_mask.T) * MASKED_ATTENTION_INDEX
+    return mask + UNMASKED_ATTENTION_INDEX
